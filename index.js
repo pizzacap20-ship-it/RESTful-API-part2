@@ -54,6 +54,53 @@ app.post('/posts', async (req, res) => {
   }
 })
 
+// Fetch all posts
+app.get('/posts', async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const query = 'SELECT * FROM posts'
+    const result = await client.query(query)
+    res.json(result.rows)
+  } catch (err) {
+    console.log(err.stack)
+    res.status(500).send('An error occurred')
+  } finally {
+    client.release()
+  }
+})
+
+app.put('/posts/:id', async (req, res) => {
+  const id = req.params.id
+  const updatedData = req.body
+  const client = await pool.connect()
+  try {
+    const updateQuery = "UPDATE posts Set title = $1, content = $2, author = $3 WHERE id = $4"
+    const queryData = [updatedData.title, updatedData.content, updatedData.author, id]
+    await client.query(updateQuery, queryData)
+    res.json({ "status": "success", "message": "Post updated successfully"})
+  } catch (error) {
+    console.error("Error: ", error.message)
+    res.status(500).json({"error": error.message})
+  } finally {
+    client.release()
+  }
+})
+
+app.delete('/posts/:id', async (req, res) => {
+  const id = req.params.id
+  const client = await pool.connect()
+  try {
+    const deleteQuery = 'DELETE FROM posts WHERE id  = $1'
+    await client.query(deleteQuery, [id])
+    res.json({ "status": "success", "message": "Post deleted successfully"})
+  } catch (error) {
+    console.error("Error: ", error.message)
+    res.status(500).json({ "error": error.message})
+  } finally {
+    client.release()
+  }
+})
+
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname + "/index.html"));
   // res.sendFile(path.join('/home/runner/RESTful-API' + '/index.html'))
