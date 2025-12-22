@@ -2,8 +2,10 @@ let express = require("express");
 let path = require("path");
 const cors = require("cors");
 const { Pool } = require("pg");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
-const { DATABASE_URL } = process.env;
+const { DATABASE_URL, SECRET_KEY } = process.env;
 
 let app = express();
 app.use(cors());
@@ -27,6 +29,73 @@ async function getPostgresVersion() {
 }
 
 getPostgresVersion();
+
+// Signup endpoint
+app.post("/signup", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // Hash the password and check existence of username
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Check for existing username
+    const userResult = await client.query(
+      "SELECT * FROM users WHERE username = $1",
+      [username],
+    );
+
+    // If username already exists, return response
+    if (userResult.rows.length > 0) {
+      return res.status(400).json({ message: "Username already taken" });
+    }
+    // username doesn't exist, then we proceed with the rest of the code
+    await client.query(
+      "INSERT INTO users (username, password) VALUES ($1, $2)",
+      [username, hashedPassword],
+    );
+
+    res.status(200).json({ message: "User registered successfully" });
+  } catch (error) {
+    console.error("Error: ", error.message);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Log in endpoint
+app.post("/login", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      "SELECT * FROM users WHERE username = $1",
+      [req.body.username],
+    );
+    const user = result.rows[0];
+
+    if (!user)
+      return res
+        .status(400)
+        .json({ message: "Username or password incorrect" });
+
+    const passwordIsValid = await bcrypt.compare(
+      req.body.password,
+      user.password,
+    );
+    if (!passwordIsValid)
+      return res.status(401).json({ auth: false, token: null });
+
+    var token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, {
+      expiresIn: 86400,
+    });
+    res.status(200).json({ auth: true, token: token });
+  } catch (error) {
+    console.error("Error: ", error.message);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
 
 // Create a new post and save it to the database
 app.post("/posts", async (req, res) => {
@@ -116,22 +185,25 @@ app.delete("/posts/:id", async (req, res) => {
 
 // Delete a post using author name
 app.delete("/posts/author/:authorName", async (req, res) => {
-  const authorName = req.params.authorName
-  const client = await pool.connect()
+  const authorName = req.params.authorName;
+  const client = await pool.connect();
   try {
-    const deleteAuthor = "DELETE FROM posts WHERE author = $1"
-    const result = await client.query(deleteAuthor, [authorName])
-    if (result.rows.length === 0) {
-      res.status(404).json({ status: "error", message: "Post not found"})
+    const deleteAuthor = "DELETE FROM posts WHERE author = $1";
+    const result = await client.query(deleteAuthor, [authorName]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ status: "error", message: "Post not found" });
     }
-    res.json({ status: 'success', message: `All posts by ${authorName} deleted`})
+    res.json({
+      status: "success",
+      message: `All posts by ${authorName} deleted`,
+    });
   } catch (error) {
-    console.error("Error", error.message)
-    res.status(500).json({ error: error.message })
+    console.error("Error", error.message);
+    res.status(500).json({ error: error.message });
   } finally {
-    client.release()
+    client.release();
   }
-})
+});
 
 // Get a post using id
 app.get("/posts/:id", async (req, res) => {
@@ -154,38 +226,60 @@ app.get("/posts/:id", async (req, res) => {
 
 // Get a post using author name
 app.get("/posts/author/:authorName", async (req, res) => {
-  const authorName = req.params.authorName
-  const client = await pool.connect()
+  const authorName = req.params.authorName;
+  const client = await pool.connect();
   try {
-    const queryAuthor = "SELECT * FROM posts WHERE author = $1"
-    const result = await client.query(queryAuthor, [authorName])
+    const queryAuthor = "SELECT * FROM posts WHERE author = $1";
+    const result = await client.query(queryAuthor, [authorName]);
     if (result.rows.length === 0) {
-      res.status(404).json({ status: "error", message: "Post not found"})
+      res.status(404).json({ status: "error", message: "Post not found" });
     }
-    res.json(result.rows[0])
+    res.json(result.rows);
   } catch (error) {
-    console.error("Error: ", error.message)
-    res.status(500).json({ error: error.message})
+    console.error("Error: ", error.message);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
-})
+});
 
 // Get a post using date range
 app.get("/posts/dates/:startDate/:endDate", async (req, res) => {
-  const startDate = req.params.startDate
-  const endDate = req.params.endDate
-  const client = await pool.connect()
+  const startDate = req.params.startDate;
+  const endDate = req.params.endDate;
+  const client = await pool.connect();
   try {
-    const queryDate = "SELECT * FROM posts WHERE created_at BETWEEN $1 AND $2 "
-    const result = await client.query(queryDate, [startDate, endDate])
+    const queryDate = "SELECT * FROM posts WHERE created_at BETWEEN $1 AND $2 ";
+    const result = await client.query(queryDate, [startDate, endDate]);
     if (result.rows.length === 0) {
-      res.status(404).json({ status: "error", message: "no posts found in this range"})
+      res
+        .status(404)
+        .json({ status: "error", message: "no posts found in this range" });
     }
-    res.json(result.rows)
+    res.json(result.rows);
   } catch (error) {
-    console.error("Error: ", error.message)
-    res.status(500).json({ error: error.message})
+    console.error("Error: ", error.message);
+    res.status(500).json({ error: error.message });
   } finally {
-    client.release()
+    client.release();
+  }
+});
+
+app.get("/username", (req, res) => {
+  // Check if the Authorization Bearer token was provided
+  const authToken = req.headers.authorization;
+
+  if (!authToken) return res.status(401).json({ error: "Access Denied" })
+
+  try {
+    // Verify the token and fetch the user information
+    const verified = jwt.verify(authToken, SECRET_KEY);
+    res.json({
+      username: verified.username // Here, fetching the username from the token
+    })
+  } catch (err) {
+    // Return an error if the token is not valid
+    res.status(400).json({ error: "Invalid Token"})
   }
 })
 
