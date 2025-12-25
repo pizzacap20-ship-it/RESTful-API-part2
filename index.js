@@ -191,7 +191,9 @@ app.delete("/posts/author/:authorName", async (req, res) => {
     const deleteAuthor = "DELETE FROM posts WHERE author = $1";
     const result = await client.query(deleteAuthor, [authorName]);
     if (result.rowCount === 0) {
-      res.status(404).json({ status: "error", message: "Post not found" });
+      return res
+        .status(404)
+        .json({ status: "error", message: "Post not found" });
     }
     res.json({
       status: "success",
@@ -213,7 +215,9 @@ app.get("/posts/:id", async (req, res) => {
     const query = "SELECT * FROM posts WHERE id = $1";
     const result = await client.query(query, [id]);
     if (result.rows.length === 0) {
-      res.status(404).json({ status: "error", message: "Post not found" });
+      return res
+        .status(404)
+        .json({ status: "error", message: "Post not found" });
     }
     res.json(result.rows[0]);
   } catch (error) {
@@ -232,7 +236,9 @@ app.get("/posts/author/:authorName", async (req, res) => {
     const queryAuthor = "SELECT * FROM posts WHERE author = $1";
     const result = await client.query(queryAuthor, [authorName]);
     if (result.rows.length === 0) {
-      res.status(404).json({ status: "error", message: "Post not found" });
+      return res
+        .status(404)
+        .json({ status: "error", message: "Post not found" });
     }
     res.json(result.rows);
   } catch (error) {
@@ -252,7 +258,7 @@ app.get("/posts/dates/:startDate/:endDate", async (req, res) => {
     const queryDate = "SELECT * FROM posts WHERE created_at BETWEEN $1 AND $2 ";
     const result = await client.query(queryDate, [startDate, endDate]);
     if (result.rows.length === 0) {
-      res
+      return res
         .status(404)
         .json({ status: "error", message: "no posts found in this range" });
     }
@@ -268,20 +274,41 @@ app.get("/posts/dates/:startDate/:endDate", async (req, res) => {
 app.get("/username", (req, res) => {
   // Check if the Authorization Bearer token was provided
   const authToken = req.headers.authorization;
-
-  if (!authToken) return res.status(401).json({ error: "Access Denied" })
-
+  if (!authToken) return res.status(401).json({ error: "Access Denied" });
   try {
     // Verify the token and fetch the user information
     const verified = jwt.verify(authToken, SECRET_KEY);
     res.json({
-      username: verified.username // Here, fetching the username from the token
-    })
+      username: verified.username, // Here, fetching the username from the token
+    });
   } catch (err) {
     // Return an error if the token is not valid
-    res.status(400).json({ error: "Invalid Token"})
+    res.status(400).json({ error: "Invalid Token" });
   }
-})
+});
+
+// Continuing from the code-along, create a new Express.js endpoint that allows a logged-in user to update their profile bio.
+// UPDATE posts
+// SET bio = 'Hello!'
+// WHERE id = 1
+app.put("/profile/bio", async (req, res) => {
+  const authToken = req.headers.authorization;
+  if (!authToken) return res.status(401).json({ error: "Access Denied" });
+  const client = await pool.connect();
+  const { bio } = req.body;
+  try {
+    const verified = jwt.verify(authToken, SECRET_KEY);
+    await client.query("UPDATE users SET bio = $1 WHERE id = $2", [
+      bio,
+      verified.id,
+    ]);
+    res.json({ message: "Bio updated successfully!" });
+  } catch (error) {
+    res.status(400).json({ error: "Invalid Token" });
+  } finally {
+    client.release();
+  }
+});
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname + "/index.html"));
